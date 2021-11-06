@@ -10,8 +10,7 @@
         "platform": {
             "php": "7.1.12"
         },
-        "preferred-install": "dist",
-        "sort-packages": true
+        "preferred-install": "dist"
     },
     "require": {
         "php": "^7.1",
@@ -21,7 +20,7 @@
     },
     "autoload": {
         "psr-4": {
-            "Kafka\\": "src"
+            "Kafka\\": "src/"
         }
     }
 }
