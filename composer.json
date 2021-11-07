@@ -7,16 +7,10 @@
         "Kafka"
     ],
     "config": {
-        "platform": {
-            "php": "7.1.12"
-        },
         "preferred-install": "dist"
     },
     "require": {
-        "php": "^7.1",
-        "amphp/amp": "^2.0.3",
-        "lcobucci/clock": "^1.0",
-        "psr/log": "^1.0"
+        "amphp/amp": "^2.0.3"
     },
     "autoload": {
         "psr-4": {
