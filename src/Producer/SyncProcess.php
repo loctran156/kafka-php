@@ -1,58 +1,59 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka\Producer;
 
-use Kafka\Broker;
-use Kafka\Exception;
-use Kafka\LoggerTrait;
-use Kafka\ProducerConfig;
-use Kafka\Protocol\Protocol;
-use Psr\Log\LoggerAwareTrait;
-use function array_keys;
-use function count;
-use function explode;
-use function json_encode;
-use function shuffle;
-use function substr;
-use function trim;
+/**
++------------------------------------------------------------------------------
+* Kafka protocol since Kafka v0.8
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
 
 class SyncProcess
 {
-    use LoggerAwareTrait;
-    use LoggerTrait;
+    use \Psr\Log\LoggerAwareTrait;
+    use \Kafka\LoggerTrait;
 
-    /** @var RecordValidator */
-    private $recordValidator;
+    // {{{ consts
+    // }}}
+    // {{{ members
+    // }}}
+    // {{{ functions
+    // {{{ public function __construct()
 
-    public function __construct(?RecordValidator $recordValidator = null)
+    public function __construct()
     {
-        $this->recordValidator = $recordValidator ?? new RecordValidator();
-
-        $config = $this->getConfig();
+        // init protocol
+        $config = \Kafka\ProducerConfig::getInstance();
         \Kafka\Protocol::init($config->getBrokerVersion(), $this->logger);
-
-        $broker = $this->getBroker();
-        $broker->setConfig($config);
-
         $this->syncMeta();
     }
 
-    /**
-     * @param mixed[][] $recordSet
-     *
-     * @return mixed[]
-     *
-     * @throws \Kafka\Exception
-     */
-    public function send(array $recordSet): array
-    {
-        $broker = $this->getBroker();
-        $config = $this->getConfig();
+    // }}}
+    // {{{ public function send()
 
-        $requiredAck = $config->getRequiredAck();
-        $timeout     = $config->getTimeout();
-        $compression = $config->getCompression();
+    public function send($data)
+    {
+        $broker = \Kafka\Broker::getInstance();
+        $requiredAck = \Kafka\ProducerConfig::getInstance()->getRequiredAck();
+        $timeout = \Kafka\ProducerConfig::getInstance()->getTimeout();
 
         // get send message
         // data struct
@@ -60,146 +61,140 @@ class SyncProcess
         //  partId:
         //  key:
         //  value:
-        if (empty($recordSet)) {
-            return [];
+        if (empty($data)) {
+            return false;
         }
 
-        $sendData = $this->convertRecordSet($recordSet);
-        $result   = [];
+        $sendData = $this->convertMessage($data);
+        $result = array();
         foreach ($sendData as $brokerId => $topicList) {
-            $connect = $broker->getDataConnect((string) $brokerId, true);
-
-            if ($connect === null) {
-                return [];
+            $connect = $broker->getDataConnect($brokerId, true);
+            if (!$connect) {
+                return false;
             }
 
-            $params = [
+            $requiredAck = \Kafka\ProducerConfig::getInstance()->getRequiredAck();
+            $params = array(
                 'required_ack' => $requiredAck,
-                'timeout'      => $timeout,
-                'data'         => $topicList,
-                'compression'  => $compression,
-            ];
-
-            $this->debug('Send message start, params:' . json_encode($params));
+                'timeout' => \Kafka\ProducerConfig::getInstance()->getTimeout(),
+                'data' => $topicList,
+            );
+            $this->debug("Send message start, params:" . json_encode($params));
             $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::PRODUCE_REQUEST, $params);
             $connect->write($requestData);
-
-            if ($requiredAck !== 0) { // If it is 0 the server will not send any response
-                $dataLen       = Protocol::unpack(Protocol::BIT_B32, $connect->read(4));
-                $recordSet     = $connect->read($dataLen);
-                $correlationId = Protocol::unpack(Protocol::BIT_B32, substr($recordSet, 0, 4));
-                $ret           = \Kafka\Protocol::decode(\Kafka\Protocol::PRODUCE_REQUEST, substr($recordSet, 4));
-
+            if ($requiredAck != 0) { // If it is 0 the server will not send any response
+                $dataLen = \Kafka\Protocol\Protocol::unpack(\Kafka\Protocol\Protocol::BIT_B32, $connect->read(4));
+                $data = $connect->read($dataLen);
+                $correlationId = \Kafka\Protocol\Protocol::unpack(\Kafka\Protocol\Protocol::BIT_B32, substr($data, 0, 4));
+                $ret = \Kafka\Protocol::decode(\Kafka\Protocol::PRODUCE_REQUEST, substr($data, 4));
                 $result[] = $ret;
             }
         }
-
         return $result;
     }
 
-    public function syncMeta(): void
+    // }}}
+    // {{{ public function syncMeta()
+
+    public function syncMeta()
     {
         $this->debug('Start sync metadata request');
-
-        $brokerList = ProducerConfig::getInstance()->getMetadataBrokerList();
-        $brokerHost = [];
-
-        foreach (explode(',', $brokerList) as $key => $val) {
+        $brokerList = explode(',', \Kafka\ProducerConfig::getInstance()->getMetadataBrokerList());
+        $brokerHost = array();
+        foreach ($brokerList as $key => $val) {
             if (trim($val)) {
                 $brokerHost[] = $val;
             }
         }
-
-        if (count($brokerHost) === 0) {
-            throw new Exception('No valid broker configured');
+        if (count($brokerHost) == 0) {
+            throw new \Kafka\Exception('Not set config `metadataBrokerList`');
         }
-
         shuffle($brokerHost);
-        $broker = $this->getBroker();
-
+        $broker = \Kafka\Broker::getInstance();
         foreach ($brokerHost as $host) {
             $socket = $broker->getMetaConnect($host, true);
+            if ($socket) {
+                $params = array();
+                $this->debug('Start sync metadata request params:' . json_encode($params));
+                $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::METADATA_REQUEST, $params);
+                $socket->write($requestData);
+                $dataLen = \Kafka\Protocol\Protocol::unpack(\Kafka\Protocol\Protocol::BIT_B32, $socket->read(4));
+                $data = $socket->read($dataLen);
+                $correlationId = \Kafka\Protocol\Protocol::unpack(\Kafka\Protocol\Protocol::BIT_B32, substr($data, 0, 4));
+                $result = \Kafka\Protocol::decode(\Kafka\Protocol::METADATA_REQUEST, substr($data, 4));
+                if (!isset($result['brokers']) || !isset($result['topics'])) {
+                    throw new \Kafka\Exception('Get metadata is fail, brokers or topics is null.');
+                } else {
+                    $broker = \Kafka\Broker::getInstance();
+                    $broker->setData($result['topics'], $result['brokers']);
+                }
+                return;
+            }
+        }
+        throw new \Kafka\Exception('Not has broker can connection `metadataBrokerList`');
+    }
 
-            if ($socket === null) {
+    // }}}
+    // {{{ protected function convertMessage()
+
+    protected function convertMessage($data)
+    {
+        $sendData = array();
+        $broker = \Kafka\Broker::getInstance();
+        $topicInfos = $broker->getTopics();
+        foreach ($data as $value) {
+            if (!isset($value['topic']) || !trim($value['topic'])) {
                 continue;
             }
 
-            $params = [];
-            $this->debug('Start sync metadata request params:' . json_encode($params));
-            $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::METADATA_REQUEST, $params);
-            $socket->write($requestData);
-            $dataLen       = Protocol::unpack(Protocol::BIT_B32, $socket->read(4));
-            $data          = $socket->read($dataLen);
-            $correlationId = Protocol::unpack(Protocol::BIT_B32, substr($data, 0, 4));
-            $result        = \Kafka\Protocol::decode(\Kafka\Protocol::METADATA_REQUEST, substr($data, 4));
-
-            if (! isset($result['brokers'], $result['topics'])) {
-                throw new Exception('Get metadata is fail, brokers or topics is null.');
+            if (!isset($topicInfos[$value['topic']])) {
+                continue;
             }
 
-            $broker = $this->getBroker();
-            $broker->setData($result['topics'], $result['brokers']);
+            if (!isset($value['value']) || !trim($value['value'])) {
+                continue;
+            }
 
-            return;
-        }
+            if (!isset($value['key'])) {
+                $value['key'] = '';
+            }
 
-        throw Exception\ConnectionException::fromBrokerList($brokerList);
-    }
-
-    /**
-     * @param string[][] $recordSet
-     *
-     * @return mixed[]
-     */
-    protected function convertRecordSet(array $recordSet): array
-    {
-        $sendData = [];
-        $broker   = $this->getBroker();
-        $topics   = $broker->getTopics();
-
-        foreach ($recordSet as $record) {
-            $this->recordValidator->validate($record, $topics);
-
-            $topicMeta = $topics[$record['topic']];
-            $partNums  = array_keys($topicMeta);
+            $topicMeta = $topicInfos[$value['topic']];
+            $partNums = array_keys($topicMeta);
             shuffle($partNums);
-
-            $partId = isset($record['partId'], $topicMeta[$record['partId']]) ? $record['partId'] : $partNums[0];
-
-            $brokerId  = $topicMeta[$partId];
-            $topicData = [];
-            if (isset($sendData[$brokerId][$record['topic']])) {
-                $topicData = $sendData[$brokerId][$record['topic']];
+            $partId = 0;
+            if (!isset($value['partId']) || !isset($topicMeta[$value['partId']])) {
+                $partId = $partNums[0];
+            } else {
+                $partId = $value['partId'];
             }
 
-            $partition = [];
+            $brokerId = $topicMeta[$partId];
+            $topicData = array();
+            if (isset($sendData[$brokerId][$value['topic']])) {
+                $topicData = $sendData[$brokerId][$value['topic']];
+            }
+
+            $partition = array();
             if (isset($topicData['partitions'][$partId])) {
                 $partition = $topicData['partitions'][$partId];
             }
 
             $partition['partition_id'] = $partId;
-
-            if (trim($record['key'] ?? '') !== '') {
-                $partition['messages'][] = ['value' => $record['value'], 'key' => $record['key']];
+            if (trim($value['key']) != '') {
+                $partition['messages'][] = array('value' => $value['value'], 'key' => $value['key']);
             } else {
-                $partition['messages'][] = $record['value'];
+                $partition['messages'][] = $value['value'];
             }
-
-            $topicData['partitions'][$partId]      = $partition;
-            $topicData['topic_name']               = $record['topic'];
-            $sendData[$brokerId][$record['topic']] = $topicData;
+            
+            $topicData['partitions'][$partId] = $partition;
+            $topicData['topic_name'] = $value['topic'];
+            $sendData[$brokerId][$value['topic']] = $topicData;
         }
 
         return $sendData;
     }
 
-    private function getBroker(): Broker
-    {
-        return Broker::getInstance();
-    }
-
-    private function getConfig(): ProducerConfig
-    {
-        return ProducerConfig::getInstance();
-    }
+    // }}}
+    // }}}
 }

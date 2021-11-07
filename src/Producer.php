@@ -1,103 +1,129 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka;
 
-use Amp\Loop;
-use Kafka\Producer\Process;
-use Kafka\Producer\SyncProcess;
-use Psr\Log\LoggerAwareTrait;
-use function is_array;
+/**
++------------------------------------------------------------------------------
+* Kafka protocol since Kafka v0.8
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
 
 class Producer
 {
-    use LoggerAwareTrait;
-    use LoggerTrait;
+    use \Psr\Log\LoggerAwareTrait;
+    use \Kafka\LoggerTrait;
+
+    // {{{ consts
+    // }}}
+    // {{{ members
+    
+    private $process = null;
+
+    // }}}
+    // {{{ functions
+    // {{{ public function __construct()
 
     /**
-     * @var Process|SyncProcess
+     * __construct
+     *
+     * @access public
+     * @param $hostList
+     * @param null $timeout
      */
-    private $process;
-
-    public function __construct(?callable $producer = null)
+    public function __construct(\Closure $producer = null)
     {
-        $this->process = $producer === null ? new SyncProcess() : new Process($producer);
+        if (is_null($producer)) {
+            $this->process = new \Kafka\Producer\SyncProcess();
+        } else {
+            $this->process = new \Kafka\Producer\Process($producer);
+        }
     }
 
+    // }}}
+    // {{{ public function send()
+
     /**
-     * @param mixed[]|bool $data
+     * start producer
      *
-     * @return mixed[]|null
-     *
-     * @throws \Kafka\Exception
+     * @access public
+     * @data is data is boolean that is async process, thus it is sync process
+     * @return void
      */
-    public function send($data = true): ?array
+    public function send($data = true)
     {
         if ($this->logger) {
             $this->process->setLogger($this->logger);
         }
-
-        if (is_array($data)) {
-            return $this->sendSynchronously($data);
+        if (is_bool($data)) {
+            $this->process->start();
+            if ($data) {
+                \Amp\run();
+            }
+        } else {
+            return $this->process->send($data);
         }
-
-        $this->sendAsynchronously($data);
-
-        return null;
     }
+
+    // }}}
+    // {{{ public function syncMeta()
 
     /**
-     * @param mixed[] $data
+     * syncMeta producer
      *
-     * @return mixed[]
-     *
-     * @throws \Kafka\Exception
+     * @access public
+     * @return void
      */
-    private function sendSynchronously(array $data): array
+    public function syncMeta()
     {
-        if (! $this->process instanceof SyncProcess) {
-            throw new Exception('An asynchronous process is not able to send messages synchronously');
-        }
-
-        return $this->process->send($data);
+        return $this->process->syncMeta();
     }
+
+    // }}}
+    // {{{ public function success()
 
     /**
-     * @throws \Kafka\Exception
+     * producer success
+     *
+     * @access public
+     * @return void
      */
-    private function sendAsynchronously(bool $startLoop): void
+    public function success(\Closure $success = null)
     {
-        if ($this->process instanceof SyncProcess) {
-            throw new Exception('A synchronous process is not able to send messages asynchronously');
-        }
-
-        $this->process->start();
-
-        if ($startLoop) {
-            Loop::run();
-        }
-    }
-
-    public function syncMeta(): void
-    {
-        $this->process->syncMeta();
-    }
-
-    public function success(callable $success): void
-    {
-        if ($this->process instanceof SyncProcess) {
-            throw new Exception('Success callback can only be configured for asynchronous process');
-        }
-
         $this->process->setSuccess($success);
     }
 
-    public function error(callable $error): void
-    {
-        if ($this->process instanceof SyncProcess) {
-            throw new Exception('Error callback can only be configured for asynchronous process');
-        }
+    // }}}
+    // {{{ public function error()
 
+    /**
+     * producer error
+     *
+     * @access public
+     * @return void
+     */
+    public function error(\Closure $error = null)
+    {
         $this->process->setError($error);
     }
+
+    // }}}
+    // }}}
 }

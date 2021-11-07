@@ -1,287 +1,316 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka\Consumer;
 
-use Kafka\Broker;
-use Kafka\SingletonTrait;
-use function count;
+/**
++------------------------------------------------------------------------------
+* Kafka protocol since Kafka v0.8
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
 
 class Assignment
 {
-    use SingletonTrait;
-
-    /**
-     * @var string
-     */
+    use \Kafka\SingletonTrait;
+    // {{{ consts
+    // }}}
+    // {{{ members
+    
     private $memberId = '';
 
-    /**
-     * @var int|null
-     */
-    private $generationId;
+    private $generationId = '';
 
-    /**
-     * @var int[][][][]
-     */
-    private $assignments = [];
+    private $assignments = array();
 
-    /**
-     * @var mixed[][]
-     */
-    private $topics = [];
+    private $topics = array();
 
-    /**
-     * @var int[][]
-     */
-    private $offsets = [];
+    private $offsets = array();
 
-    /**
-     * @var int[][]
-     */
-    private $lastOffsets = [];
+    private $lastOffsets = array();
 
-    /**
-     * @var int[][]
-     */
-    private $fetchOffsets = [];
+    private $fetchOffsets = array();
 
-    /**
-     * @var int[][]
-     */
-    private $consumerOffsets = [];
+    private $consumerOffsets = array();
 
-    /**
-     * @var int[][]
-     */
-    private $commitOffsets = [];
+    private $commitOffsets = array();
 
-    /**
-     * @var int[][]
-     */
-    private $preCommitOffsets = [];
+    private $precommitOffsets = array();
 
-    public function setMemberId(string $memberId): void
+    private $is_first_load = array();
+
+
+    public function setFirstLoad($topic_name, $partitions_id, $is)
+    {
+        $this->is_first_load[$topic_name][$partitions_id] = $is;
+    }
+    public function getFirstLoad($topic_name, $partitions_id)
+    {
+        if(isset($this->is_first_load[$topic_name]) && isset($this->is_first_load[$topic_name][$partitions_id]))
+        {
+            return $this->is_first_load[$topic_name][$partitions_id];
+        }
+        return false;
+    }   
+    // }}}
+    // {{{ functions
+    // {{{ public function setMemberId()
+
+    public function setMemberId($memberId)
     {
         $this->memberId = $memberId;
     }
 
-    public function getMemberId(): string
+    // }}}
+    // {{{ public function getMemberId()
+
+    public function getMemberId()
     {
         return $this->memberId;
     }
 
-    public function setGenerationId(int $generationId): void
+    // }}}
+    // {{{ public function setGenerationId()
+
+    public function setGenerationId($generationId)
     {
         $this->generationId = $generationId;
     }
 
-    public function getGenerationId(): ?int
+    // }}}
+    // {{{ public function getGenerationId()
+
+    public function getGenerationId()
     {
         return $this->generationId;
     }
 
-    /**
-     * @return int[][][][]
-     */
-    public function getAssignments(): array
+    // }}}
+    // {{{ public function getAssignments()
+
+    public function getAssignments()
     {
         return $this->assignments;
     }
 
-    /**
-     * @param string[] $result
-     */
-    public function assign(array $result): void
+    // }}}
+    // {{{ public function assign()
+
+    public function assign($result)
     {
-        /** @var Broker $broker */
-        $broker = Broker::getInstance();
+        $broker = \Kafka\Broker::getInstance();
         $topics = $broker->getTopics();
 
         $memberCount = count($result);
 
-        $count   = 0;
-        $members = [];
-
-        foreach ($topics as $topicName => $partitionition) {
-            foreach ($partitionition as $partitionId => $leaderId) {
+        $count = 0;
+        $members = array();
+        foreach ($topics as $topicName => $partition) {
+            foreach ($partition as $partId => $leaderId) {
                 $memberNum = $count % $memberCount;
-
-                if (! isset($members[$memberNum])) {
-                    $members[$memberNum] = [];
+                if (!isset($members[$memberNum])) {
+                    $members[$memberNum] = array();
                 }
-
-                if (! isset($members[$memberNum][$topicName])) {
-                    $members[$memberNum][$topicName] = [];
+                if (!isset($members[$memberNum][$topicName])) {
+                    $members[$memberNum][$topicName] = array();
                 }
-
                 $members[$memberNum][$topicName]['topic_name'] = $topicName;
-
-                if (! isset($members[$memberNum][$topicName]['partitions'])) {
-                    $members[$memberNum][$topicName]['partitions'] = [];
+                if (!isset($members[$memberNum][$topicName]['partitions'])) {
+                    $members[$memberNum][$topicName]['partitions'] = array();
                 }
-
-                $members[$memberNum][$topicName]['partitions'][] = $partitionId;
-                ++$count;
+                $members[$memberNum][$topicName]['partitions'][] = $partId;
+                $count++;
             }
         }
 
-        $data = [];
-
+        $data = array();
         foreach ($result as $key => $member) {
-            $data[] = [
-                'version'     => 0,
-                'member_id'   => $member['memberId'],
-                'assignments' => $members[$key] ?? [],
-            ];
+            $item = array(
+                'version' => 0,
+                'member_id' => $member['memberId'],
+                'assignments' => isset($members[$key]) ? $members[$key] : array()
+            );
+            $data[] = $item;
         }
-
         $this->assignments = $data;
     }
 
-    /**
-     * @param mixed[][] $topics
-     */
-    public function setTopics(array $topics): void
+    // }}}
+    // {{{ public function setTopics()
+
+    public function setTopics($topics)
     {
         $this->topics = $topics;
     }
 
-    /**
-     * @return mixed[][]
-     */
-    public function getTopics(): array
+    // }}}
+    // {{{ public function getTopics()
+
+    public function getTopics()
     {
         return $this->topics;
     }
 
-    /**
-     * @param int[][] $offsets
-     */
-    public function setOffsets(array $offsets): void
+    // }}}
+    // {{{ public function setOffsets()
+
+    public function setOffsets($offsets)
     {
         $this->offsets = $offsets;
     }
 
-    /**
-     * @return int[][]
-     */
-    public function getOffsets(): array
+    // }}}
+    // {{{ public function getOffsets()
+
+    public function getOffsets()
     {
         return $this->offsets;
     }
 
-    /**
-     * @param int[][] $offsets
-     */
-    public function setLastOffsets(array $offsets): void
+    // }}}
+    // {{{ public function setLastOffsets()
+
+    public function setLastOffsets($offsets)
     {
         $this->lastOffsets = $offsets;
     }
 
-    /**
-     * @return int[][]
-     */
-    public function getLastOffsets(): array
+    // }}}
+    // {{{ public function getOffsets()
+
+    public function getLastOffsets()
     {
         return $this->lastOffsets;
     }
 
-    /**
-     * @param int[][] $offsets
-     */
-    public function setFetchOffsets(array $offsets): void
+    // }}}
+    // {{{ public function setFetchOffsets()
+
+    public function setFetchOffsets($offsets)
     {
         $this->fetchOffsets = $offsets;
     }
 
-    /**
-     * @return int[][]
-     */
-    public function getFetchOffsets(): array
+    // }}}
+    // {{{ public function getFetchOffsets()
+
+    public function getFetchOffsets()
     {
         return $this->fetchOffsets;
     }
 
-    /**
-     * @param int[][] $offsets
-     */
-    public function setConsumerOffsets(array $offsets): void
+    // }}}
+    // {{{ public function setConsumerOffsets()
+
+    public function setConsumerOffsets($offsets)
     {
         $this->consumerOffsets = $offsets;
     }
 
-    /**
-     * @return int[][]
-     */
-    public function getConsumerOffsets(): array
+    // }}}
+    // {{{ public function getConsumerOffsets()
+
+    public function getConsumerOffsets()
     {
         return $this->consumerOffsets;
     }
 
-    public function setConsumerOffset(string $topic, int $partition, int $offset): void
+    // }}}
+    // {{{ public function setConsumerOffset()
+
+    public function setConsumerOffset($topic, $part, $offset)
     {
-        $this->consumerOffsets[$topic][$partition] = $offset;
+        $this->consumerOffsets[$topic][$part] = $offset;
     }
 
-    public function getConsumerOffset(string $topic, int $partition): ?int
+    // }}}
+    // {{{ public function getConsumerOffset()
+
+    public function getConsumerOffset($topic, $part)
     {
-        if (! isset($this->consumerOffsets[$topic][$partition])) {
-            return null;
+        if (!isset($this->consumerOffsets[$topic][$part])) {
+            return false;
         }
-
-        return $this->consumerOffsets[$topic][$partition];
+        return $this->consumerOffsets[$topic][$part];
     }
 
-    /**
-     * @param int[][] $offsets
-     */
-    public function setCommitOffsets(array $offsets): void
+    // }}}
+    // {{{ public function setCommitOffsets()
+
+    public function setCommitOffsets($offsets)
     {
         $this->commitOffsets = $offsets;
     }
 
-    /**
-     * @return int[][]
-     */
-    public function getCommitOffsets(): array
+    // }}}
+    // {{{ public function getCommitOffsets()
+
+    public function getCommitOffsets()
     {
         return $this->commitOffsets;
     }
 
-    public function setCommitOffset(string $topic, int $partition, int $offset): void
+    // }}}
+    // {{{ public function setCommitOffset()
+
+    public function setCommitOffset($topic, $part, $offset)
     {
-        $this->commitOffsets[$topic][$partition] = $offset;
+        $this->commitOffsets[$topic][$part] = $offset;
     }
 
-    /**
-     * @param int[][] $offsets
-     */
-    public function setPreCommitOffsets(array $offsets): void
+    // }}}
+    // {{{ public function setPrecommitOffsets()
+
+    public function setPrecommitOffsets($offsets)
     {
-        $this->preCommitOffsets = $offsets;
+        $this->precommitOffsets = $offsets;
     }
 
-    /**
-     * @return int[][]
-     */
-    public function getPreCommitOffsets(): array
+    // }}}
+    // {{{ public function getPrecommitOffsets()
+
+    public function getPrecommitOffsets()
     {
-        return $this->preCommitOffsets;
+        return $this->precommitOffsets;
     }
 
-    public function setPreCommitOffset(string $topic, int $partition, int $offset): void
+    // }}}
+    // {{{ public function setPrecommitOffset()
+
+    public function setPrecommitOffset($topic, $part, $offset)
     {
-        $this->preCommitOffsets[$topic][$partition] = $offset;
+        $this->precommitOffsets[$topic][$part] = $offset;
     }
 
-    public function clearOffset(): void
+    // }}}
+    // {{{ public function clearOffset()
+
+    public function clearOffset()
     {
-        $this->offsets          = [];
-        $this->lastOffsets      = [];
-        $this->fetchOffsets     = [];
-        $this->consumerOffsets  = [];
-        $this->commitOffsets    = [];
-        $this->preCommitOffsets = [];
+        $this->offsets = array();
+        $this->lastOffsets = array();
+        $this->fetchOffsets = array();
+        $this->consumerOffsets = array();
+        $this->commitOffsets = array();
+        $this->precommitOffsets = array();
     }
+
+    // }}}
+    // }}}
 }

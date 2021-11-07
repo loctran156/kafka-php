@@ -26,7 +26,7 @@ namespace Kafka;
 +------------------------------------------------------------------------------
 */
 
-class Socket
+class Socketp
 {
     // {{{ consts
 
@@ -263,6 +263,8 @@ class Socket
         $this->writeWatcher = \Amp\onWritable($this->stream, function () {
             $this->write();
         }, array('enable' => false)); // <-- let's initialize the watcher as "disabled"
+
+        return ["readWatcher" => $this->readWatcher , "writeWatcher" => $this->writeWatcher];
     }
 
     // }}}
@@ -313,8 +315,8 @@ class Socket
     // {{{ public function close()
 
     /**
-     * close the socket
-     *
+     * close the socke
+t     *
      * @access public
      * @return void
      */
@@ -328,6 +330,7 @@ class Socket
         $this->readBuffer = '';
         $this->writeBuffer = '';
         $this->readNeedLength = 0;
+        echo "set close socket\n";
     }
 
     /**
@@ -376,7 +379,12 @@ class Socket
 
             $this->readBuffer = substr($this->readBuffer, $this->readNeedLength);
             $this->readNeedLength = 0;
-            call_user_func($this->onReadable, $data, (int)$this->stream);
+
+            // \Amp\cancel($this->readWatcher);
+            // \Amp\cancel($this->writeWatcher);
+
+
+            call_user_func($this->onReadable, $data);
         } while (strlen($this->readBuffer));
     }
 
@@ -398,6 +406,7 @@ class Socket
         }
         $bytesToWrite = strlen($this->writeBuffer);
         $bytesWritten = @fwrite($this->stream, $this->writeBuffer);
+
 
         if ($bytesToWrite === $bytesWritten) {
             \Amp\disable($this->writeWatcher);
@@ -424,4 +433,9 @@ class Socket
 
     // }}}
     // }}}
+
+    public function get_watcher_id()
+    {
+        return [$this->readWatcher, $this->writeWatcher];
+    }
 }

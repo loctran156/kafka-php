@@ -1,58 +1,99 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka\Protocol;
 
-use Kafka\Exception\NotSupported;
-use function substr;
+/**
++------------------------------------------------------------------------------
+* Kafka protocol for list group api
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
 
 class ListGroup extends Protocol
 {
+    // {{{ functions
+    // {{{ public function encode()
+
     /**
-     * @param mixed[] $payloads
+     * list group request encode
      *
-     * @throws NotSupported
+     * @param array $payloads
+     * @access public
+     * @return string
      */
-    public function encode(array $payloads = []): string
+    public function encode($payloads)
     {
         $header = $this->requestHeader('kafka-php', self::LIST_GROUPS_REQUEST, self::LIST_GROUPS_REQUEST);
+        $data = self::encodeString($header, self::PACK_INT32);
 
-        return self::encodeString($header, self::PACK_INT32);
+        return $data;
     }
 
+    // }}}
+    // {{{ public function decode()
+
     /**
-     * @return mixed[]
+     * decode group response
+     *
+     * @access public
+     * @return array
      */
-    public function decode(string $data): array
+    public function decode($data)
     {
-        $offset    = 0;
+        $offset = 0;
         $errorCode = self::unpack(self::BIT_B16_SIGNED, substr($data, $offset, 2));
-        $offset   += 2;
-        $groups    = $this->decodeArray(substr($data, $offset), [$this, 'decodeGroup']);
+        $offset += 2;
+        $groups = $this->decodeArray(substr($data, $offset), array($this, 'listGroup'));
 
-        return [
+        return array(
             'errorCode' => $errorCode,
-            'groups'    => $groups['data'],
-        ];
+            'groups' => $groups['data'],
+        );
     }
+
+    // }}}
+    // {{{ protected function listGroup()
 
     /**
-     * @return mixed[]
+     * decode list group response
+     *
+     * @access protected
+     * @return array
      */
-    protected function decodeGroup(string $data): array
+    protected function listGroup($data)
     {
-        $offset       = 0;
-        $groupId      = $this->decodeString(substr($data, $offset), self::BIT_B16);
-        $offset      += $groupId['length'];
+        $offset = 0;
+        $groupId = $this->decodeString(substr($data, $offset), self::BIT_B16);
+        $offset += $groupId['length'];
         $protocolType = $this->decodeString(substr($data, $offset), self::BIT_B16);
-        $offset      += $protocolType['length'];
+        $offset += $protocolType['length'];
 
-        return [
+        return array(
             'length' => $offset,
-            'data'   => [
-                'groupId'      => $groupId['data'],
+            'data' => array(
+                'groupId' => $groupId['data'],
                 'protocolType' => $protocolType['data'],
-            ],
-        ];
+            )
+        );
     }
+
+    // }}}
+    // }}}
 }

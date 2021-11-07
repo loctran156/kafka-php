@@ -1,110 +1,141 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka\Producer;
 
-use Amp\Loop;
-use Kafka\ProducerConfig;
-use Kafka\SingletonTrait;
-use function array_keys;
-use function is_array;
-use function microtime;
+/**
++------------------------------------------------------------------------------
+* Kafka protocol since Kafka v0.8
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
 
 class State
 {
-    use SingletonTrait;
+    use \Kafka\SingletonTrait;
+    // {{{ consts
 
-    public const REQUEST_METADATA = 1;
-    public const REQUEST_PRODUCE  = 2;
+    const REQUEST_METADATA  = 1;
+    const REQUEST_PRODUCE  = 2;
 
-    public const STATUS_INIT    = 0;
-    public const STATUS_STOP    = 1;
-    public const STATUS_START   = 2;
-    public const STATUS_LOOP    = 4;
-    public const STATUS_PROCESS = 8;
-    public const STATUS_FINISH  = 16;
+    const STATUS_INIT  = 0;
+    const STATUS_STOP  = 1;
+    const STATUS_START = 2;
+    const STATUS_LOOP    = 4;
+    const STATUS_PROCESS = 8;
+    const STATUS_FINISH  = 16;
 
-    /**
-     * @var mixed[]
-     */
-    private $callStatus = [];
+    // }}}
+    // {{{ members
+    
+    private $callStatus = array();
+    
+    private $requests  = array(
+        self::REQUEST_METADATA => array(),
+        self::REQUEST_PRODUCE => array(),
+    );
 
-    /**
-     * @var mixed[][]
-     */
-    private $requests = [
-        self::REQUEST_METADATA => [],
-        self::REQUEST_PRODUCE => [],
-    ];
+    // }}}
+    // {{{ functions
+    // {{{ public function init()
 
-    public function init(): void
+    public function init()
     {
-        $this->callStatus = [
-            self::REQUEST_METADATA => ['status' => self::STATUS_LOOP],
-            self::REQUEST_PRODUCE  => ['status' => self::STATUS_LOOP],
-        ];
+        $this->callStatus = array(
+            self::REQUEST_METADATA => array(
+                'status'=> self::STATUS_LOOP,
+            ),
+            self::REQUEST_PRODUCE => array(
+                'status'=> self::STATUS_LOOP,
+            ),
+        );
 
-        $config = $this->getConfig();
+        // instances clear
 
-        foreach (array_keys($this->requests) as $request) {
-            if ($request === self::REQUEST_METADATA) {
+        // init requests
+        $config = \Kafka\ConsumerConfig::getInstance();
+        foreach ($this->requests as $request => $option) {
+            switch ($request) {
+            case self::REQUEST_METADATA:
                 $this->requests[$request]['interval'] = $config->getMetadataRefreshIntervalMs();
                 break;
+            default:
+                $isAsyn = $config->getIsAsyn();
+                if ($isAsyn) {
+                    $this->requests[$request]['interval'] = $config->getProduceInterval();
+                } else {
+                    $this->requests[$request]['interval'] = 1;
+                }
             }
-
-            $interval = $config->getIsAsyn() ? $config->getProduceInterval() : 1;
-
-            $this->requests[$request]['interval'] = $interval;
         }
     }
 
-    public function start(): void
+    // }}}
+    // {{{ public function start()
+
+    public function start()
     {
         foreach ($this->requests as $request => $option) {
-            $interval = $option['interval'] ?? 200;
-
-            Loop::repeat((int) $interval, function (string $watcherId) use ($request, $option): void {
-                if ($this->checkRun($request) && $option['func'] !== null) {
-                    $this->processing($request, $option['func']());
+            $interval = isset($option['interval']) ? $option['interval'] : 200;
+            \Amp\repeat(function ($watcherId) use ($request, $option) {
+                if ($this->checkRun($request) && $option['func'] != null) {
+                    $context = call_user_func($option['func']);
+                    $this->processing($request, $context);
                 }
-
                 $this->requests[$request]['watcher'] = $watcherId;
-            });
+            }, $msInterval = $interval);
         }
 
         // start sync metadata
-        if (isset($request, $this->requests[self::REQUEST_METADATA]['func'])
-            && $this->callStatus[self::REQUEST_METADATA]['status'] === self::STATUS_LOOP) {
-            $context = $this->requests[self::REQUEST_METADATA]['func']();
+        if (isset($this->requests[self::REQUEST_METADATA]['func'])
+            && $this->callStatus[self::REQUEST_METADATA]['status'] == self::STATUS_LOOP) {
+            $context = call_user_func($this->requests[self::REQUEST_METADATA]['func']);
             $this->processing($request, $context);
         }
+        \Amp\repeat(function ($watcherId) {
+            $this->report();
+        }, $msInterval = 1000);
     }
 
-    /**
-     * @param mixed|null $context
-     */
-    public function succRun(int $key, $context = null): void
-    {
-        $config = $this->getConfig();
-        $isAsyn = $config->getIsAsyn();
+    // }}}
+    // {{{ public function succRun()
 
-        if (! isset($this->callStatus[$key])) {
-            return;
+    public function succRun($key, $context = null)
+    {
+        $config = \Kafka\ConsumerConfig::getInstance();
+        $isAsyn = $config->getIsAsyn();
+        if (!isset($this->callStatus[$key])) {
+            return false;
         }
 
         switch ($key) {
             case self::REQUEST_METADATA:
                 $this->callStatus[$key]['status'] = (self::STATUS_LOOP | self::STATUS_FINISH);
-
-                if ($context !== null) { // if kafka broker is change
+                if ($context) { // if kafka broker is change
                     $this->recover();
                 }
                 break;
             case self::REQUEST_PRODUCE:
-                if ($context === null) {
-                    if (! $isAsyn) {
+                if ($context == null) {
+                    if (!$isAsyn) {
                         $this->callStatus[$key]['status'] = self::STATUS_FINISH;
-                        Loop::stop();
+                        \Amp\stop();
                     } else {
                         $this->callStatus[$key]['status'] = (self::STATUS_LOOP | self::STATUS_FINISH);
                     }
@@ -112,11 +143,10 @@ class State
                 }
                 unset($this->callStatus[$key]['context'][$context]);
                 $contextStatus = $this->callStatus[$key]['context'];
-
                 if (empty($contextStatus)) {
-                    if (! $isAsyn) {
+                    if (!$isAsyn) {
                         $this->callStatus[$key]['status'] = self::STATUS_FINISH;
-                        Loop::stop();
+                        \Amp\stop();
                     } else {
                         $this->callStatus[$key]['status'] = (self::STATUS_LOOP | self::STATUS_FINISH);
                     }
@@ -125,10 +155,13 @@ class State
         }
     }
 
-    public function failRun(int $key): void
+    // }}}
+    // {{{ public function failRun()
+
+    public function failRun($key, $context = null)
     {
-        if (! isset($this->callStatus[$key])) {
-            return;
+        if (!isset($this->callStatus[$key])) {
+            return false;
         }
 
         switch ($key) {
@@ -141,73 +174,70 @@ class State
         }
     }
 
-    /**
-     * @param callable[] $callbacks
-     */
-    public function setCallback(array $callbacks): void
+    // }}}
+    // {{{ public function setCallback()
+
+    public function setCallback($callbacks)
     {
         foreach ($callbacks as $request => $callback) {
             $this->requests[$request]['func'] = $callback;
         }
     }
 
-    public function recover(): void
+    // }}}
+    // {{{ public function recover()
+
+    public function recover()
     {
-        $this->callStatus = [
+        $this->callStatus = array(
             self::REQUEST_METADATA => $this->callStatus[self::REQUEST_METADATA],
-            self::REQUEST_PRODUCE => [
+            self::REQUEST_PRODUCE => array(
                 'status'=> self::STATUS_LOOP,
-            ],
-        ];
+            ),
+        );
     }
 
-    protected function checkRun(int $key): bool
+    // }}}
+    // {{{ protected function checkRun()
+
+    protected function checkRun($key)
     {
-        if (! isset($this->callStatus[$key])) {
+        if (!isset($this->callStatus[$key])) {
             return false;
         }
 
         $status = $this->callStatus[$key]['status'];
-
         switch ($key) {
             case self::REQUEST_METADATA:
-                if (($status & self::STATUS_PROCESS) === self::STATUS_PROCESS) {
+                if ($status & self::STATUS_PROCESS == self::STATUS_PROCESS) {
                     return false;
                 }
-
-                if (($status & self::STATUS_LOOP) === self::STATUS_LOOP) {
+                if (($status & self::STATUS_LOOP) == self::STATUS_LOOP) {
                     return true;
                 }
-
                 return false;
             case self::REQUEST_PRODUCE:
-                if (($status & self::STATUS_PROCESS) === self::STATUS_PROCESS) {
+                if (($status & self::STATUS_PROCESS) == self::STATUS_PROCESS) {
                     return false;
                 }
-
                 $syncStatus = $this->callStatus[self::REQUEST_METADATA]['status'];
-
-                if (($syncStatus & self::STATUS_FINISH) !== self::STATUS_FINISH) {
+                if (($syncStatus & self::STATUS_FINISH) != self::STATUS_FINISH) {
                     return false;
                 }
-
-                if (($status & self::STATUS_LOOP) === self::STATUS_LOOP) {
+                if (($status & self::STATUS_LOOP) == self::STATUS_LOOP) {
                     return true;
                 }
-
                 return false;
         }
-
-        return false;
     }
 
-    /**
-     * @param mixed $context
-     */
-    protected function processing(int $key, $context): void
+    // }}}
+    // {{{ protected function processing()
+
+    protected function processing($key, $context)
     {
-        if (! isset($this->callStatus[$key])) {
-            return;
+        if (!isset($this->callStatus[$key])) {
+            return false;
         }
 
         // set process start time
@@ -220,25 +250,26 @@ class State
                 if (empty($context)) {
                     break;
                 }
-
                 $this->callStatus[$key]['status'] |= self::STATUS_PROCESS;
-
-                $contextStatus = [];
-
+                $contextStatus = array();
                 if (is_array($context)) {
                     foreach ($context as $fd) {
                         $contextStatus[$fd] = self::STATUS_PROCESS;
                     }
-
                     $this->callStatus[$key]['context'] = $contextStatus;
                 }
-
                 break;
         }
     }
 
-    private function getConfig(): ProducerConfig
+    // }}}
+    // {{{ protected function report()
+
+    protected function report()
     {
-        return ProducerConfig::getInstance();
+        //var_dump($this->callStatus[self::REQUEST_COMMIT_OFFSET]);
     }
+
+    // }}}
+    // }}}
 }

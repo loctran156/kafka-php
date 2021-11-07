@@ -1,100 +1,102 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka;
 
-use Kafka\Protocol\Produce;
-use function in_array;
-
 /**
- * @method int getRequestTimeout()
- * @method int getProduceInterval()
- * @method int getTimeout()
- * @method int getRequiredAck()
- * @method bool getIsAsyn()
- * @method int getCompression()
- */
++------------------------------------------------------------------------------
+* Kafka protocol since Kafka v0.8
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
+
 class ProducerConfig extends Config
 {
     use SingletonTrait;
+    // {{{ consts
+    // }}}
+    // {{{ members
 
-    private const COMPRESSION_OPTIONS = [
-        Produce::COMPRESSION_NONE,
-        Produce::COMPRESSION_GZIP,
-        Produce::COMPRESSION_SNAPPY,
-    ];
-
-    /**
-     * @var mixed[]
-     */
-    protected static $defaults = [
-        'requiredAck'     => 1,
-        'timeout'         => 5000,
-        'isAsyn'          => false,
-        'requestTimeout'  => 6000,
+    protected static $defaults = array(
+        'requiredAck' => 1,
+        'timeout' => 5000,
+        'isAsyn' => false,
+        'requestTimeout' => 6000,
         'produceInterval' => 100,
-        'compression'     => Protocol\Protocol::COMPRESSION_NONE,
-    ];
+    );
 
-    /**
-     * @throws \Kafka\Exception\Config
-     */
-    public function setRequestTimeout(int $requestTimeout): void
+    // }}}
+    // {{{ functions
+    // {{{ public function setRequestTimeout()
+
+    public function setRequestTimeout($requestTimeout)
     {
-        if ($requestTimeout < 1 || $requestTimeout > 900000) {
-            throw new Exception\Config('Set request timeout value is invalid, must set it 1 .. 900000');
+        if (!is_numeric($requestTimeout) || $requestTimeout < 1 || $requestTimeout > 900000) {
+            throw new \Kafka\Exception\Config('Set request timeout value is invalid, must set it 1 .. 900000');
         }
-
         static::$options['requestTimeout'] = $requestTimeout;
     }
 
-    /**
-     * @throws \Kafka\Exception\Config
-     */
-    public function setProduceInterval(int $produceInterval): void
-    {
-        if ($produceInterval < 1 || $produceInterval > 900000) {
-            throw new Exception\Config('Set produce interval timeout value is invalid, must set it 1 .. 900000');
-        }
+    // }}}
+    // {{{ public function setProduceInterval()
 
+    public function setProduceInterval($produceInterval)
+    {
+        if (!is_numeric($produceInterval) || $produceInterval < 1 || $produceInterval > 900000) {
+            throw new \Kafka\Exception\Config('Set produce interval timeout value is invalid, must set it 1 .. 900000');
+        }
         static::$options['produceInterval'] = $produceInterval;
     }
 
-    /**
-     * @throws \Kafka\Exception\Config
-     */
-    public function setTimeout(int $timeout): void
-    {
-        if ($timeout < 1 || $timeout > 900000) {
-            throw new Exception\Config('Set timeout value is invalid, must set it 1 .. 900000');
-        }
+    // }}}
+    // {{{ public function setTimeout()
 
+    public function setTimeout($timeout)
+    {
+        if (!is_numeric($timeout) || $timeout < 1 || $timeout > 900000) {
+            throw new \Kafka\Exception\Config('Set timeout value is invalid, must set it 1 .. 900000');
+        }
         static::$options['timeout'] = $timeout;
     }
 
-    /**
-     * @throws \Kafka\Exception\Config
-     */
-    public function setRequiredAck(int $requiredAck): void
-    {
-        if ($requiredAck < -1 || $requiredAck > 1000) {
-            throw new Exception\Config('Set required ack value is invalid, must set it -1 .. 1000');
-        }
+    // }}}
+    // {{{ public function setRequiredAck()
 
+    public function setRequiredAck($requiredAck)
+    {
+        if (!is_numeric($requiredAck) || $requiredAck < -1 || $requiredAck > 1000) {
+            throw new \Kafka\Exception\Config('Set required ack value is invalid, must set it -1 .. 1000');
+        }
         static::$options['requiredAck'] = $requiredAck;
     }
 
-    public function setIsAsyn(bool $asyn): void
+    // }}}
+    // {{{ public function setIsAsyn()
+
+    public function setIsAsyn($asyn)
     {
+        if (!is_bool($asyn)) {
+            throw new \Kafka\Exception\Config('Set isAsyn value is invalid, must set it bool value');
+        }
         static::$options['isAsyn'] = $asyn;
     }
 
-    public function setCompression(int $compression): void
-    {
-        if (! in_array($compression, self::COMPRESSION_OPTIONS, true)) {
-            throw new Exception\Config('Compression must be one the Kafka\Protocol\Produce::COMPRESSION_* constants');
-        }
-
-        static::$options['compression'] = $compression;
-    }
+    // }}}
+    // }}}
 }

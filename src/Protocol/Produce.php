@@ -1,151 +1,155 @@
 <?php
-declare(strict_types=1);
+/* vim: set expandtab tabstop=4 shiftwidth=4 softtabstop=4 foldmethod=marker: */
+// +---------------------------------------------------------------------------
+// | SWAN [ $_SWANBR_SLOGAN_$ ]
+// +---------------------------------------------------------------------------
+// | Copyright $_SWANBR_COPYRIGHT_$
+// +---------------------------------------------------------------------------
+// | Version  $_SWANBR_VERSION_$
+// +---------------------------------------------------------------------------
+// | Licensed ( $_SWANBR_LICENSED_URL_$ )
+// +---------------------------------------------------------------------------
+// | $_SWANBR_WEB_DOMAIN_$
+// +---------------------------------------------------------------------------
 
 namespace Kafka\Protocol;
 
-use Kafka\Exception\NotSupported;
-use Kafka\Exception\Protocol as ProtocolException;
-use Lcobucci\Clock\Clock;
-use Lcobucci\Clock\SystemClock;
-use function crc32;
-use function is_array;
-use function substr;
+/**
++------------------------------------------------------------------------------
+* Kafka protocol for produce api
++------------------------------------------------------------------------------
+*
+* @package
+* @version $_SWANBR_VERSION_$
+* @copyright Copyleft
+* @author $_SWANBR_AUTHOR_$
++------------------------------------------------------------------------------
+*/
 
 class Produce extends Protocol
 {
-    /**
-     * Specifies the mask for the compression code. 3 bits to hold the compression codec.
-     * 0 is reserved to indicate no compression
-     */
-    public const COMPRESSION_CODEC_MASK = 0x07;
+    // {{{ functions
+    // {{{ public function encode()
 
     /**
-     * Specify the mask of timestamp type: 0 for CreateTime, 1 for LogAppendTime.
-     */
-    private const TIMESTAMP_TYPE_MASK = 0x08;
-
-    private const TIMESTAMP_NONE            = -1;
-    private const TIMESTAMP_CREATE_TIME     = 0;
-    private const TIMESTAMP_LOG_APPEND_TIME = 1;
-
-    /**
-     * @var Clock
-     */
-    private $clock;
-
-    public function __construct(string $version = self::DEFAULT_BROKER_VERION, ?Clock $clock = null)
-    {
-        parent::__construct($version);
-
-        $this->clock = $clock ?: new SystemClock();
-    }
-
-    /**
-     * @param mixed[] $payloads
+     * produce request encode
      *
-     * @throws NotSupported
-     * @throws ProtocolException
+     * @param array $payloads
+     * @access public
+     * @return string
      */
-    public function encode(array $payloads = []): string
+    public function encode($payloads)
     {
-        if (! isset($payloads['data'])) {
-            throw new ProtocolException('given procude data invalid. `data` is undefined.');
+        if (!isset($payloads['data'])) {
+            throw new \Kafka\Exception\Protocol('given procude data invalid. `data` is undefined.');
+        }
+
+        if (!isset($payloads['required_ack'])) {
+            // default server will not send any response
+            // (this is the only case where the server will not reply to a request)
+            $payloads['required_ack'] = 0;
+        }
+
+        if (!isset($payloads['timeout'])) {
+            $payloads['timeout'] = 100; // default timeout 100ms
         }
 
         $header = $this->requestHeader('kafka-php', 0, self::PRODUCE_REQUEST);
-        $data   = self::pack(self::BIT_B16, (string) ($payloads['required_ack'] ?? 0));
-        $data  .= self::pack(self::BIT_B32, (string) ($payloads['timeout'] ?? 100));
-        $data  .= self::encodeArray(
-            $payloads['data'],
-            [$this, 'encodeProduceTopic'],
-            $payloads['compression'] ?? self::COMPRESSION_NONE
-        );
+        $data   = self::pack(self::BIT_B16, $payloads['required_ack']);
+        $data  .= self::pack(self::BIT_B32, $payloads['timeout']);
+        $data  .= self::encodeArray($payloads['data'], array($this, 'encodeProcudeTopic'), self::COMPRESSION_NONE);
+        $data   = self::encodeString($header . $data, self::PACK_INT32);
 
-        return self::encodeString($header . $data, self::PACK_INT32);
+        return $data;
     }
+
+    // }}}
+    // {{{ public function decode()
 
     /**
-     * @return mixed[]
+     * decode produce response
      *
-     * @throws ProtocolException
+     * @access public
+     * @return array
      */
-    public function decode(string $data): array
+    public function decode($data)
     {
-        $offset       = 0;
-        $version      = $this->getApiVersion(self::PRODUCE_REQUEST);
-        $ret          = $this->decodeArray(substr($data, $offset), [$this, 'produceTopicPair'], $version);
-        $offset      += $ret['length'];
+        $offset = 0;
+        $version = $this->getApiVersion(self::PRODUCE_REQUEST);
+        $ret = $this->decodeArray(substr($data, $offset), array($this, 'produceTopicPair'), $version);
+        $offset += $ret['length'];
         $throttleTime = 0;
-
-        if ($version === self::API_VERSION2) {
+        if ($version == self::API_VERSION2) {
             $throttleTime = self::unpack(self::BIT_B32, substr($data, $offset, 4));
         }
-
-        return ['throttleTime' => $throttleTime, 'data' => $ret['data']];
+        return array('throttleTime' => $throttleTime, 'data' => $ret['data']);
     }
+
+    // }}}
+    // {{{ protected function encodeMessageSet()
 
     /**
      * encode message set
      * N.B., MessageSets are not preceded by an int32 like other array elements
      * in the protocol.
      *
-     * @param string[]|string[][] $messages
-     *
-     * @throws NotSupported
+     * @param array $messages
+     * @param int $compression
+     * @return string
+     * @static
+     * @access public
      */
-    protected function encodeMessageSet(array $messages, int $compression = self::COMPRESSION_NONE): string
+    protected function encodeMessageSet($messages, $compression = self::COMPRESSION_NONE)
     {
+        if (!is_array($messages)) {
+            $messages = array($messages);
+        }
+
         $data = '';
         $next = 0;
-
         foreach ($messages as $message) {
-            $encodedMessage = $this->encodeMessage($message);
+            $tmpMessage = $this->encodeMessage($message, $compression);
 
-            $data .= self::pack(self::BIT_B64, (string) $next)
-                   . self::encodeString($encodedMessage, self::PACK_INT32);
-
-            ++$next;
+            // int64 -- message offset     Message
+            //This is the offset used in kafka as the log sequence number. When the producer is sending non compressed messages, it can set the offsets to anything. When the producer is sending compressed messages, to avoid server side recompression, each compressed message should have offset starting from 0 and increasing by one for each inner message in the compressed message. (see more details about compressed messages in Kafka below)
+            $data .= self::pack(self::BIT_B64, $next) . self::encodeString($tmpMessage, self::PACK_INT32);
+            $next++;
         }
-
-        if ($compression === self::COMPRESSION_NONE) {
-            return $data;
-        }
-
-        return self::pack(self::BIT_B64, '0')
-             . self::encodeString($this->encodeMessage($data, $compression), self::PACK_INT32);
+        return $data;
     }
 
+    // }}}
+    // {{{ protected function encodeMessage()
+
     /**
-     * @param string[]|string $message
+     * encode signal message
      *
-     * @throws NotSupported
+     * @param string $message
+     * @param int $compression
+     * @return string
+     * @static
+     * @access protected
      */
-    protected function encodeMessage($message, int $compression = self::COMPRESSION_NONE): string
+    protected function encodeMessage($message, $compression = self::COMPRESSION_NONE)
     {
-        $magic      = $this->computeMagicByte();
-        $attributes = $this->computeAttributes($magic, $compression, $this->computeTimestampType($magic));
-
-        $data  = self::pack(self::BIT_B8, (string) $magic);
-        $data .= self::pack(self::BIT_B8, (string) $attributes);
-
-        if ($magic >= self::MESSAGE_MAGIC_VERSION1) {
-            $data .= self::pack(self::BIT_B64, $this->clock->now()->format('Uv'));
-        }
+        // int8 -- magic  int8 -- attribute
+        $version = $this->getApiVersion(self::PRODUCE_REQUEST);
+        $magic = ($version == self::API_VERSION2) ? self::MESSAGE_MAGIC_VERSION0 : self::MESSAGE_MAGIC_VERSION1;
+        $data  = self::pack(self::BIT_B8, $magic);
+        $data .= self::pack(self::BIT_B8, $compression);
 
         $key = '';
-
         if (is_array($message)) {
-            $key     = $message['key'];
+            $key = $message['key'];
             $message = $message['value'];
         }
-
         // message key
         $data .= self::encodeString($key, self::PACK_INT32);
 
         // message value
         $data .= self::encodeString($message, self::PACK_INT32, $compression);
 
-        $crc = (string) crc32($data);
+        $crc = crc32($data);
 
         // int32 -- crc code  string data
         $message = self::pack(self::BIT_B32, $crc) . $data;
@@ -153,149 +157,120 @@ class Produce extends Protocol
         return $message;
     }
 
-    private function computeMagicByte(): int
-    {
-        if ($this->getApiVersion(self::PRODUCE_REQUEST) === self::API_VERSION2) {
-            return self::MESSAGE_MAGIC_VERSION1;
-        }
-
-        return self::MESSAGE_MAGIC_VERSION0;
-    }
-
-    public function computeTimestampType(int $magic): int
-    {
-        if ($magic === self::MESSAGE_MAGIC_VERSION0) {
-            return self::TIMESTAMP_NONE;
-        }
-
-        return self::TIMESTAMP_CREATE_TIME;
-    }
-
-    private function computeAttributes(int $magic, int $compression, int $timestampType): int
-    {
-        $attributes = 0;
-
-        if ($compression !== self::COMPRESSION_NONE) {
-            $attributes |= self::COMPRESSION_CODEC_MASK & $compression;
-        }
-
-        if ($magic === self::MESSAGE_MAGIC_VERSION0) {
-            return $attributes;
-        }
-
-        if ($timestampType === self::TIMESTAMP_LOG_APPEND_TIME) {
-            $attributes |= self::TIMESTAMP_TYPE_MASK;
-        }
-
-        return $attributes;
-    }
+    // }}}
+    // {{{ protected function encodeProcudePartion()
 
     /**
      * encode signal part
      *
-     * @param mixed[] $values
-     *
-     * @throws NotSupported
-     * @throws ProtocolException
+     * @param $values
+     * @param $compression
+     * @return string
+     * @internal param $partions
+     * @access protected
      */
-    protected function encodeProducePartition(array $values, int $compression): string
+    protected function encodeProcudePartion($values, $compression)
     {
-        if (! isset($values['partition_id'])) {
-            throw new ProtocolException('given produce data invalid. `partition_id` is undefined.');
+        if (!isset($values['partition_id'])) {
+            throw new \Kafka\Exception\Protocol('given produce data invalid. `partition_id` is undefined.');
         }
 
-        if (! isset($values['messages']) || empty($values['messages'])) {
-            throw new ProtocolException('given produce data invalid. `messages` is undefined.');
+        if (!isset($values['messages']) || empty($values['messages'])) {
+            throw new \Kafka\Exception\Protocol('given produce data invalid. `messages` is undefined.');
         }
 
-        $data  = self::pack(self::BIT_B32, (string) $values['partition_id']);
-        $data .= self::encodeString(
-            $this->encodeMessageSet((array) $values['messages'], $compression),
-            self::PACK_INT32
-        );
+        $data = self::pack(self::BIT_B32, $values['partition_id']);
+        $data .= self::encodeString($this->encodeMessageSet($values['messages'], $compression), self::PACK_INT32);
 
         return $data;
     }
 
+    // }}}
+    // {{{ protected function encodeProcudeTopic()
+
     /**
      * encode signal topic
      *
-     * @param mixed[] $values
-     *
-     * @throws NotSupported
-     * @throws ProtocolException
+     * @param $values
+     * @param $compression
+     * @return string
+     * @internal param $partions
+     * @access protected
      */
-    protected function encodeProduceTopic(array $values, int $compression): string
+    protected function encodeProcudeTopic($values, $compression)
     {
-        if (! isset($values['topic_name'])) {
-            throw new ProtocolException('given produce data invalid. `topic_name` is undefined.');
+        if (!isset($values['topic_name'])) {
+            throw new \Kafka\Exception\Protocol('given produce data invalid. `topic_name` is undefined.');
         }
 
-        if (! isset($values['partitions']) || empty($values['partitions'])) {
-            throw new ProtocolException('given produce data invalid. `partitions` is undefined.');
+        if (!isset($values['partitions']) || empty($values['partitions'])) {
+            throw new \Kafka\Exception\Protocol('given produce data invalid. `partitions` is undefined.');
         }
 
-        $topic      = self::encodeString($values['topic_name'], self::PACK_INT16);
-        $partitions = self::encodeArray($values['partitions'], [$this, 'encodeProducePartition'], $compression);
+        $topic = self::encodeString($values['topic_name'], self::PACK_INT16);
+        $partitions = self::encodeArray($values['partitions'], array($this, 'encodeProcudePartion'), $compression);
 
         return $topic . $partitions;
     }
 
+    // }}}
+    // {{{ protected function produceTopicPair()
+
     /**
      * decode produce topic pair response
      *
-     * @return mixed[]
-     *
-     * @throws ProtocolException
+     * @access protected
+     * @return array
      */
-    protected function produceTopicPair(string $data, int $version): array
+    protected function produceTopicPair($data, $version)
     {
-        $offset    = 0;
+        $offset = 0;
         $topicInfo = $this->decodeString($data, self::BIT_B16);
-        $offset   += $topicInfo['length'];
-        $ret       = $this->decodeArray(substr($data, $offset), [$this, 'producePartitionPair'], $version);
-        $offset   += $ret['length'];
+        $offset += $topicInfo['length'];
+        $ret = $this->decodeArray(substr($data, $offset), array($this, 'producePartitionPair'), $version);
+        $offset += $ret['length'];
 
-        return [
-            'length' => $offset,
-            'data'   => [
-                'topicName'  => $topicInfo['data'],
-                'partitions' => $ret['data'],
-            ],
-        ];
+        return array('length' => $offset, 'data' => array(
+            'topicName' => $topicInfo['data'],
+            'partitions'=> $ret['data'],
+        ));
     }
+
+    // }}}
+    // {{{ protected function producePartitionPair()
 
     /**
      * decode produce partition pair response
      *
-     * @return mixed[]
-     *
-     * @throws ProtocolException
+     * @access protected
+     * @return array
      */
-    protected function producePartitionPair(string $data, int $version): array
+    protected function producePartitionPair($data, $version)
     {
-        $offset          = 0;
-        $partitionId     = self::unpack(self::BIT_B32, substr($data, $offset, 4));
-        $offset         += 4;
-        $errorCode       = self::unpack(self::BIT_B16_SIGNED, substr($data, $offset, 2));
-        $offset         += 2;
+        $offset = 0;
+        $partitionId = self::unpack(self::BIT_B32, substr($data, $offset, 4));
+        $offset += 4;
+        $errorCode = self::unpack(self::BIT_B16_SIGNED, substr($data, $offset, 2));
+        $offset += 2;
         $partitionOffset = self::unpack(self::BIT_B64, substr($data, $offset, 8));
-        $offset         += 8;
-        $timestamp       = 0;
-
-        if ($version === self::API_VERSION2) {
+        $offset += 8;
+        $timestamp = 0;
+        if ($version == self::API_VERSION2) {
             $timestamp = self::unpack(self::BIT_B64, substr($data, $offset, 8));
-            $offset   += 8;
+            $offset += 8;
         }
 
-        return [
+        return array(
             'length' => $offset,
-            'data'   => [
+            'data'   => array(
                 'partition' => $partitionId,
                 'errorCode' => $errorCode,
-                'offset'    => $offset,
+                'offset' => $offset,
                 'timestamp' => $timestamp,
-            ],
-        ];
+            )
+        );
     }
+
+    // }}}
+    // }}}
 }
