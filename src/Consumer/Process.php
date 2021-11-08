@@ -142,7 +142,6 @@ class Process
     // }}}
     // {{{ protected function processRequest()
 
-
     /**
      * process Request
      *
@@ -507,7 +506,6 @@ class Process
 
     protected function fetchOffset()
     {
-
         $broker = \Kafka\Broker::getInstance();
         $groupBrokerId = $broker->getGroupBrokerId();
         $connect = $broker->getMetaConnect($groupBrokerId);
@@ -544,7 +542,6 @@ class Process
 
     public function succFetchOffset($result)
     {
-        \Kafka\Consumer\Assignment::getInstance()->log("succFetchOffset: ".json_encode($result));
         $msg = sprintf('Get current fetch offset sucess, result: %s', json_encode($result));
         $this->debug($msg);
 
@@ -560,26 +557,16 @@ class Process
                 $offsets[$topic['topicName']][$part['partition']] = $part['offset'];
             }
         }
-
-
         $assign->setFetchOffsets($offsets);
 
         $consumerOffsets = $assign->getConsumerOffsets();
         $lastOffsets = $assign->getLastOffsets();
-
         if (empty($consumerOffsets)) {
             $consumerOffsets = $assign->getFetchOffsets();
             foreach ($consumerOffsets as $topic => $value) {
                 foreach ($value as $partId => $offset) {
-
-                    if($offset < 0)
-                    {
-                        $offset = 0;
-                    }
-
                     if (isset($lastOffsets[$topic][$partId]) && $lastOffsets[$topic][$partId] > $offset) {
-                        // $consumerOffsets[$topic][$partId] = $offset + 1;
-$consumerOffsets[$topic][$partId] = $offset;
+                        $consumerOffsets[$topic][$partId] = $offset + 1;
                     }
                 }
             }
@@ -594,7 +581,6 @@ $consumerOffsets[$topic][$partId] = $offset;
 
     protected function fetch()
     {
-
         $this->messages = array();
         $context = array();
         $broker = \Kafka\Broker::getInstance();
@@ -628,7 +614,6 @@ $consumerOffsets[$topic][$partId] = $offset;
                 'data' => $data,
             );
             $this->debug("Fetch message start, params:" . json_encode($params));
-            \Kafka\Consumer\Assignment::getInstance()->log("Fetch: ".json_encode($params));
             $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::FETCH_REQUEST, $params);
             $connect->write($requestData);
             $context[] = (int)$connect->getSocket();
@@ -641,7 +626,6 @@ $consumerOffsets[$topic][$partId] = $offset;
 
     public function succFetch($result, $fd)
     {
-        \Kafka\Consumer\Assignment::getInstance()->log("succFetch: ".json_encode($result));
         $assign = \Kafka\Consumer\Assignment::getInstance();
         $this->debug('Fetch success, result:' . json_encode($result));
         foreach ($result['topics'] as $topic) {
@@ -660,18 +644,16 @@ $consumerOffsets[$topic][$partId] = $offset;
                     return; // current is rejoin....
                 }
                 foreach ($part['messages'] as $message) {
-                    $message['highwaterMarkOffset'] = $part['highwaterMarkOffset'];
                     $this->messages[$topic['topicName']][$part['partition']][] = $message;
-
                     //if ($this->consumer != null) {
                     //    call_user_func($this->consumer, $topic['topicName'], $part['partition'], $message);
                     //}
                     $offset = $message['offset'];
                 }
 
-                // $consumerOffset = ($part['highwaterMarkOffset'] > $offset) ? ($offset + 1) : $offset;
-                // $assign->setConsumerOffset($topic['topicName'], $part['partition'], $consumerOffset);
-                // $assign->setCommitOffset($topic['topicName'], $part['partition'], $offset);
+                $consumerOffset = ($part['highwaterMarkOffset'] > $offset) ? ($offset + 1) : $offset;
+                $assign->setConsumerOffset($topic['topicName'], $part['partition'], $consumerOffset);
+                $assign->setCommitOffset($topic['topicName'], $part['partition'], $offset);
             }
         }
         $this->state->succRun(\Kafka\Consumer\State::REQUEST_FETCH, $fd);
@@ -698,7 +680,6 @@ $consumerOffsets[$topic][$partId] = $offset;
 
     protected function commit()
     {
-        
         $config= ConsumerConfig::getInstance();
         if($config->getConsumeMode() == ConsumerConfig::CONSUME_BEFORE_COMMIT_OFFSET)
         {
@@ -714,7 +695,6 @@ $consumerOffsets[$topic][$partId] = $offset;
         }
 
         $commitOffsets = \Kafka\Consumer\Assignment::getInstance()->getCommitOffsets();
-       \Kafka\Consumer\Assignment::getInstance()->log("commit: aaa...". json_encode($commitOffsets));
         $topics = \Kafka\Consumer\Assignment::getInstance()->getTopics();
         \Kafka\Consumer\Assignment::getInstance()->setPrecommitOffsets($commitOffsets);
         $data = array();
@@ -728,7 +708,6 @@ $consumerOffsets[$topic][$partId] = $offset;
                     if ($commitOffsets[$topic['topic_name']][$partId] == -1) {
                         continue;
                     }
-
                     $partitions[$partId]['partition'] = $partId;
                     $partitions[$partId]['offset'] = $commitOffsets[$topic['topic_name']][$partId];
                 }
@@ -743,9 +722,6 @@ $consumerOffsets[$topic][$partId] = $offset;
             'data' => $data,
         );
         $this->debug("Commit current fetch offset start, params:" . json_encode($params));
-        
-        \Kafka\Consumer\Assignment::getInstance()->log("commit: ...". json_encode($params));
-
         $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::OFFSET_COMMIT_REQUEST, $params);
         $connect->write($requestData);
     }
@@ -760,8 +736,6 @@ $consumerOffsets[$topic][$partId] = $offset;
     public function succCommit($result)
     {
         $this->debug('Commit success, result:' . json_encode($result));
-        \Kafka\Consumer\Assignment::getInstance()->log("succ commit: ".json_encode($result));
-
         $this->state->succRun(\Kafka\Consumer\State::REQUEST_COMMIT_OFFSET);
         foreach ($result as $topic) {
             foreach ($topic['partitions'] as $part) {
