@@ -544,6 +544,7 @@ class Process
 
     public function succFetchOffset($result)
     {
+        \Kafka\Consumer\Assignment::getInstance()->log("succFetchOffset: ".json_encode($result));
         $msg = sprintf('Get current fetch offset sucess, result: %s', json_encode($result));
         $this->debug($msg);
 
@@ -627,6 +628,7 @@ $consumerOffsets[$topic][$partId] = $offset;
                 'data' => $data,
             );
             $this->debug("Fetch message start, params:" . json_encode($params));
+            \Kafka\Consumer\Assignment::getInstance()->log("Fetch: ".json_encode($params));
             $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::FETCH_REQUEST, $params);
             $connect->write($requestData);
             $context[] = (int)$connect->getSocket();
@@ -639,9 +641,9 @@ $consumerOffsets[$topic][$partId] = $offset;
 
     public function succFetch($result, $fd)
     {
+        \Kafka\Consumer\Assignment::getInstance()->log("succFetch: ".json_encode($result));
         $assign = \Kafka\Consumer\Assignment::getInstance();
         $this->debug('Fetch success, result:' . json_encode($result));
-        $assign->log('Fetch success, result:' . json_encode($result));
         foreach ($result['topics'] as $topic) {
             foreach ($topic['partitions'] as $part) {
                 $context = array(
@@ -658,7 +660,7 @@ $consumerOffsets[$topic][$partId] = $offset;
                     return; // current is rejoin....
                 }
                 foreach ($part['messages'] as $message) {
-                    $message['highwaterMarkOffset'] = $part['highwaterMarkOffset']; 
+                    $message['highwaterMarkOffset'] = $part['highwaterMarkOffset'];
                     $this->messages[$topic['topicName']][$part['partition']][] = $message;
 
                     //if ($this->consumer != null) {
@@ -696,7 +698,7 @@ $consumerOffsets[$topic][$partId] = $offset;
 
     protected function commit()
     {
-
+        
         $config= ConsumerConfig::getInstance();
         if($config->getConsumeMode() == ConsumerConfig::CONSUME_BEFORE_COMMIT_OFFSET)
         {
@@ -712,7 +714,7 @@ $consumerOffsets[$topic][$partId] = $offset;
         }
 
         $commitOffsets = \Kafka\Consumer\Assignment::getInstance()->getCommitOffsets();
-       
+       \Kafka\Consumer\Assignment::getInstance()->log("commit: aaa...". json_encode($commitOffsets));
         $topics = \Kafka\Consumer\Assignment::getInstance()->getTopics();
         \Kafka\Consumer\Assignment::getInstance()->setPrecommitOffsets($commitOffsets);
         $data = array();
@@ -741,6 +743,9 @@ $consumerOffsets[$topic][$partId] = $offset;
             'data' => $data,
         );
         $this->debug("Commit current fetch offset start, params:" . json_encode($params));
+        
+        \Kafka\Consumer\Assignment::getInstance()->log("commit: ...". json_encode($params));
+
         $requestData = \Kafka\Protocol::encode(\Kafka\Protocol::OFFSET_COMMIT_REQUEST, $params);
         $connect->write($requestData);
     }
@@ -755,6 +760,8 @@ $consumerOffsets[$topic][$partId] = $offset;
     public function succCommit($result)
     {
         $this->debug('Commit success, result:' . json_encode($result));
+        \Kafka\Consumer\Assignment::getInstance()->log("succ commit: ".json_encode($result));
+
         $this->state->succRun(\Kafka\Consumer\State::REQUEST_COMMIT_OFFSET);
         foreach ($result as $topic) {
             foreach ($topic['partitions'] as $part) {
