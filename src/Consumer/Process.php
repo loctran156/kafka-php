@@ -143,14 +143,6 @@ class Process
     // {{{ protected function processRequest()
 
 
-    public function log($mess)
-    {
-        if(is_array($mess))
-        {
-            $mess = json_encode($mess);
-        }
-        file_put_contents(LOGPATH."consumer_.log", $mess."\n", FILE_APPEND);
-    }
     /**
      * process Request
      *
@@ -515,7 +507,7 @@ class Process
 
     protected function fetchOffset()
     {
-$this->log("fetchOffset");
+
         $broker = \Kafka\Broker::getInstance();
         $groupBrokerId = $broker->getGroupBrokerId();
         $connect = $broker->getMetaConnect($groupBrokerId);
@@ -552,7 +544,6 @@ $this->log("fetchOffset");
 
     public function succFetchOffset($result)
     {
-$this->log("succFetchOffset ".json_encode($result));
         $msg = sprintf('Get current fetch offset sucess, result: %s', json_encode($result));
         $this->debug($msg);
 
@@ -602,7 +593,7 @@ $consumerOffsets[$topic][$partId] = $offset;
 
     protected function fetch()
     {
-$this->log("fetch.....");
+
         $this->messages = array();
         $context = array();
         $broker = \Kafka\Broker::getInstance();
@@ -650,7 +641,7 @@ $this->log("fetch.....");
     {
         $assign = \Kafka\Consumer\Assignment::getInstance();
         $this->debug('Fetch success, result:' . json_encode($result));
-        $this->log('Fetch success, result:' . json_encode($result));
+        $assign->log('Fetch success, result:' . json_encode($result));
         foreach ($result['topics'] as $topic) {
             foreach ($topic['partitions'] as $part) {
                 $context = array(
@@ -667,6 +658,7 @@ $this->log("fetch.....");
                     return; // current is rejoin....
                 }
                 foreach ($part['messages'] as $message) {
+                    $message['highwaterMarkOffset'] = $part['highwaterMarkOffset']; 
                     $this->messages[$topic['topicName']][$part['partition']][] = $message;
 
                     //if ($this->consumer != null) {
@@ -675,9 +667,9 @@ $this->log("fetch.....");
                     $offset = $message['offset'];
                 }
 
-                $consumerOffset = ($part['highwaterMarkOffset'] > $offset) ? ($offset + 1) : $offset;
-                $assign->setConsumerOffset($topic['topicName'], $part['partition'], $consumerOffset);
-                $assign->setCommitOffset($topic['topicName'], $part['partition'], $offset);
+                // $consumerOffset = ($part['highwaterMarkOffset'] > $offset) ? ($offset + 1) : $offset;
+                // $assign->setConsumerOffset($topic['topicName'], $part['partition'], $consumerOffset);
+                // $assign->setCommitOffset($topic['topicName'], $part['partition'], $offset);
             }
         }
         $this->state->succRun(\Kafka\Consumer\State::REQUEST_FETCH, $fd);
@@ -704,7 +696,7 @@ $this->log("fetch.....");
 
     protected function commit()
     {
-        $this->log("commit........");
+
         $config= ConsumerConfig::getInstance();
         if($config->getConsumeMode() == ConsumerConfig::CONSUME_BEFORE_COMMIT_OFFSET)
         {
@@ -763,8 +755,6 @@ $this->log("fetch.....");
     public function succCommit($result)
     {
         $this->debug('Commit success, result:' . json_encode($result));
-        $this->log('Commit success, result:' . json_encode($result));
-
         $this->state->succRun(\Kafka\Consumer\State::REQUEST_COMMIT_OFFSET);
         foreach ($result as $topic) {
             foreach ($topic['partitions'] as $part) {
