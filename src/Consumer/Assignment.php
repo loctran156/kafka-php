@@ -56,18 +56,17 @@ class Assignment
     private $is_first_load = array();
 
 
-    public function setFirstLoad($topic_name, $partitions_id, $is)
+    
+    public function log($mess)
     {
-        $this->is_first_load[$topic_name][$partitions_id] = $is;
-    }
-    public function getFirstLoad($topic_name, $partitions_id)
-    {
-        if(isset($this->is_first_load[$topic_name]) && isset($this->is_first_load[$topic_name][$partitions_id]))
+        if(is_array($mess))
         {
-            return $this->is_first_load[$topic_name][$partitions_id];
+            $mess = json_encode($mess);
         }
-        return false;
-    }   
+        file_put_contents(LOGPATH."consumer_.log", $mess."\n", FILE_APPEND);
+    }
+
+  
     // }}}
     // {{{ functions
     // {{{ public function setMemberId()
