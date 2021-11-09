@@ -57,14 +57,14 @@ class Assignment
 
 
     
-    public function log($mess)
-    {
-        if(is_array($mess))
-        {
-            $mess = json_encode($mess);
-        }
-        file_put_contents(LOGPATH."consumer_.log", $mess."\n", FILE_APPEND);
-    }
+    // public function log($mess)
+    // {
+    //     if(is_array($mess))
+    //     {
+    //         $mess = json_encode($mess);
+    //     }
+    //     file_put_contents(LOGPATH."consumer_.log", $mess."\n", FILE_APPEND);
+    // }
 
   
     // }}}
